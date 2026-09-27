@@ -1,7 +1,7 @@
 <h1 align="center">muse2api</h1>
 
 <p align="center">
-  把 <a href="https://muse.ai">muse.ai</a> 网页端能力封装为 <b>OpenAI 兼容 API</b> 的异步网关
+  An async gateway that exposes the <a href="https://muse.ai">muse.ai</a> web app as an <b>OpenAI-compatible API</b>
 </p>
 
 <p align="center">
@@ -14,122 +14,126 @@
 
 ---
 
-## 目录
+## Contents
 
-- [项目简介](#项目简介)
-- [当前进度](#当前进度)
-- [架构设计](#架构设计)
-- [目录结构](#目录结构)
-- [快速开始](#快速开始)
-- [API 使用示例](#api-使用示例)
-- [配置项](#配置项)
-- [路线图与可认领模块](#路线图与可认领模块)
-- [参与开发](#参与开发)
-- [声明](#声明)
+- [Overview](#overview)
+- [Status](#status)
+- [Architecture](#architecture)
+- [Project layout](#project-layout)
+- [Quick start](#quick-start)
+- [API examples](#api-examples)
+- [Configuration](#configuration)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Disclaimer](#disclaimer)
 
-## 项目简介
+## Overview
 
-muse2api 把 muse.ai 的对话、文生图、文生视频能力，转换成标准的 OpenAI 接口（`/v1/chat/completions`、`/v1/images/generations` 等），这样现有的 OpenAI SDK、ChatGPT-Next-Web、LobeChat、Cherry Studio 等客户端改一下 `base_url` 就能直接使用。
+muse2api turns muse.ai's chat, text-to-image and text-to-video features into standard OpenAI endpoints (`/v1/chat/completions`, `/v1/images/generations`, ...). Existing OpenAI SDKs and clients such as ChatGPT-Next-Web, LobeChat or Cherry Studio work by just changing their `base_url`.
 
-和同类项目相比，本项目的重点是**工程化与可协作性**：
+The project focuses on **clean engineering and easy collaboration**:
 
-- **可插拔 Driver**：访问上游的方式被抽象成 `MuseDriver` 接口，目前有 Mock、浏览器（CDP）两种实现，另外预留了协议直连（HTTP）实现，互相不影响。
-- **严格分层**：协议层、服务层、账号池、驱动层职责单一，每一层都可以单独开发和测试。
-- **全异步**：基于 FastAPI + asyncio，CDP 客户端基于 `websockets` 实现，请求处理不占用阻塞线程。
-- **账号池**：支持多种调度策略、单账号并发上限、失败冷却、会话失效自动下线，以及故障自动切换账号。
-- **离线开发**：Mock 驱动不需要账号也不访问外网，前端和协议层可以独立推进。
+- **Pluggable drivers**: how we reach upstream is abstracted behind a `MuseDriver` interface. There are currently a mock driver and a browser (CDP) driver, plus a reserved slot for a direct-protocol (HTTP) driver. They are fully independent of each other.
+- **Strict layering**: the protocol layer, service layer, account pool and drivers each have a single responsibility and can be developed and tested on their own.
+- **Fully async**: built on FastAPI + asyncio; the CDP client uses `websockets`, so no request ever blocks a thread.
+- **Account pool**: multiple scheduling strategies, per-account concurrency limits, cooldown after failures, automatic removal of expired sessions, and automatic failover to another account.
+- **Offline development**: the mock driver needs no account and makes no network calls, so front-end and protocol work can move forward independently.
 
-## 当前进度
+## Status
 
-> **v0.1 框架阶段**：整体架构和基础功能的代码已经写完，但尚未跑过测试，也还没有用真实 muse.ai 账号联调。
+> **v0.1, framework stage**: the architecture and basic features are fully written, but the test suite has not been run yet and nothing has been tested against a real muse.ai account.
 
-| 模块 | 状态 | 说明 |
+| Module | Status | Notes |
 |---|---|---|
-| OpenAI 协议层（chat 流式/非流式、images、videos、models） | ✅ 已实现 | 多轮对话、System Prompt、图片输入、模型别名 |
-| 账号池（调度 / 冷却 / 失效下线 / 故障转移） | ✅ 已实现 | 支持 `lru`、`round_robin`、`affinity` 三种策略 |
-| 后台任务（视频） | ✅ 已实现 | 创建任务后轮询结果；服务重启时未完成的任务会被标记为中断 |
-| Admin API（账号增删改查、续期、重置、状态） | ✅ 已实现 | |
-| Mock 驱动 | ✅ 已实现 | 离线假数据 |
-| Browser 驱动（Chromium + CDP） | 🧪 待联调 | 对话、生图、生视频的完整流程已写好 |
-| 会话续期 / 保活 | 🧪 待联调 | 基于 HTTP，默认关闭 |
-| HTTP 协议直连驱动 | 🚧 预留 | 调用时返回 501 |
-| `/v1/responses`、`/v1/images/edits` | 🚧 预留 | 调用时返回 501 |
-| Web 管理面板、Cookie 导入扩展、额度查询 | 🚧 预留 | |
+| OpenAI protocol layer (chat streaming/non-streaming, images, videos, models) | ✅ Implemented | Multi-turn chat, system prompts, image input, model aliases |
+| Account pool (scheduling / cooldown / invalidation / failover) | ✅ Implemented | `lru`, `round_robin` and `affinity` strategies |
+| Background tasks (video) | ✅ Implemented | Create a task, then poll for the result; unfinished tasks are marked interrupted after a restart |
+| Admin API (account CRUD, renewal, reset, status) | ✅ Implemented | |
+| Mock driver | ✅ Implemented | Offline fake data |
+| Browser driver (Chromium + CDP) | 🧪 Needs live testing | Full chat, image and video flows are written |
+| Session renewal / keepalive | 🧪 Needs live testing | Plain HTTP, disabled by default |
+| Direct HTTP protocol driver | 🚧 Reserved | Returns 501 |
+| `/v1/responses`, `/v1/images/edits` | 🚧 Reserved | Returns 501 |
+| Web console, cookie import extension, quota lookup | 🚧 Reserved | |
 
-## 架构设计
+## Architecture
 
 ```
-          OpenAI SDK / Chat 客户端
-                    │  HTTP (Bearer Key)
+          OpenAI SDK / chat clients
+                    │  HTTP (Bearer key)
 ┌───────────────────▼────────────────────────────────────┐
-│ api/          协议层：路由 · 请求校验 · 鉴权 · SSE 流式输出 │
+│ api/        Protocol: routes · validation · auth · SSE │
 ├────────────────────────────────────────────────────────┤
-│ services/     服务层：Gateway（故障转移）· TaskManager    │
+│ services/   Gateway (failover) · TaskManager           │
 ├──────────────────────────┬─────────────────────────────┤
-│ accounts/  账号池         │ core/  模型别名 · prompt 转换 │
-│ 调度策略 · 冷却 · 续期     │        媒体存储               │
+│ accounts/  Account pool   │ core/  Model aliases        │
+│ strategies · cooldown ·   │        prompt conversion    │
+│ renewal                   │        media storage        │
 ├──────────────────────────┴─────────────────────────────┤
-│ drivers/      MuseDriver 接口（唯一接触上游的层）          │
-│   ├─ mock      离线假数据                                │
-│   ├─ browser   Chromium + CDP，每账号独立 BrowserContext │
-│   └─ http      协议直连（预留）                           │
+│ drivers/    MuseDriver interface (only layer that      │
+│             talks to upstream)                         │
+│   ├─ mock      offline fake data                       │
+│   ├─ browser   Chromium + CDP, one BrowserContext per  │
+│   │            account                                 │
+│   └─ http      direct protocol (reserved)              │
 ├────────────────────────────────────────────────────────┤
-│ upstream/     muse.ai 的 URL、cookie 名、会话续期接口      │
+│ upstream/   muse.ai URLs, cookie names, session API    │
 └────────────────────────────────────────────────────────┘
                     │
                  muse.ai
 ```
 
-**一次对话请求的处理流程**：路由解析模型别名，并把多轮 messages 合并成一条 prompt，然后交给 Gateway。Gateway 从账号池借出一个账号，调用 Driver 获取流式文本。如果失败，按错误类型更新账号状态：会话失效的账号会被下线，额度耗尽的账号进入冷却，其他错误短暂冷却。只要还没有向客户端输出任何内容，就自动换一个账号重试。
+**How a chat request is handled**: the route resolves the model alias and merges the multi-turn `messages` into a single prompt, then hands it to the Gateway. The Gateway leases an account from the pool and asks the driver for a text stream. On failure, the account's state is updated according to the error type: accounts with an expired session are taken offline, accounts out of quota cool down, and other errors cause a short cooldown. As long as nothing has been sent to the client yet, the request is retried on another account.
 
-流式请求会先拿到第一段输出再返回 200，所以"没有可用账号""上游鉴权失败"这类错误会以正确的 HTTP 状态码返回，而不是输出到一半断掉的流。
+For streaming requests, the first chunk is fetched before returning 200. Errors such as "no account available" or "upstream authentication failed" therefore come back with a proper HTTP status code instead of a stream that breaks halfway.
 
-更详细的设计说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
-## 目录结构
+## Project layout
 
 ```
 muse2api/
 ├── src/muse2api/
-│   ├── app.py                 # FastAPI 应用工厂与生命周期
-│   ├── config.py              # 配置（环境变量 / .env）
-│   ├── errors.py              # 错误体系 → HTTP 状态码 + OpenAI 错误格式
+│   ├── app.py                 # FastAPI app factory and lifespan
+│   ├── config.py              # Settings (environment variables / .env)
+│   ├── errors.py              # Error hierarchy → HTTP status + OpenAI error body
 │   ├── api/
-│   │   ├── deps.py            # 鉴权、依赖注入
-│   │   ├── schemas.py         # OpenAI 请求模型
+│   │   ├── deps.py            # Auth and dependency injection
+│   │   ├── schemas.py         # OpenAI request models
 │   │   └── routes/            # chat / images / videos / media / models / admin / responses
 │   ├── services/
-│   │   ├── gateway.py         # 在账号池上执行驱动调用，失败时换号重试
-│   │   ├── tasks.py           # 后台长任务
-│   │   └── container.py       # 服务装配
-│   ├── accounts/              # 账号模型、JSON 存储、账号池、会话保活
-│   ├── core/                  # 模型注册与别名、prompt 转换、媒体存储
+│   │   ├── gateway.py         # Runs driver calls on pooled accounts, retries on another account
+│   │   ├── tasks.py           # Background long-running tasks
+│   │   └── container.py       # Service wiring
+│   ├── accounts/              # Account model, JSON store, pool, session keepalive
+│   ├── core/                  # Model registry and aliases, prompt conversion, media storage
 │   ├── drivers/
-│   │   ├── base.py            # MuseDriver 接口与数据结构
+│   │   ├── base.py            # MuseDriver interface and data types
 │   │   ├── mock.py
 │   │   ├── browser/           # cdp.py / chromium.py / dom.py / driver.py
-│   │   └── http/              # 预留
-│   └── upstream/muse.py       # 上游常量与会话续期
-├── tests/                     # 基于 Mock 驱动的测试，不访问外网
+│   │   └── http/              # Reserved
+│   └── upstream/muse.py       # Upstream constants and session renewal
+├── tests/                     # Mock-driver tests, no network access
 ├── docs/ARCHITECTURE.md
+├── TODO.md                    # Task board for contributors
 ├── Dockerfile · docker-compose.yml · .env.example
 └── CONTRIBUTING.md
 ```
 
-## 快速开始
+## Quick start
 
-### 本地运行
+### Run locally
 
 ```bash
 git clone https://github.com/www222fff/muse2api.git
 cd muse2api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-cp .env.example .env      # 默认 MUSE2API_DRIVER=mock，不需要账号即可启动
-python -m muse2api        # 默认监听 http://127.0.0.1:18610
+cp .env.example .env      # defaults to MUSE2API_DRIVER=mock, no account needed
+python -m muse2api        # listens on http://127.0.0.1:18610 by default
 ```
 
-如果没有设置 `MUSE2API_API_KEY`，首次启动时会自动生成一个密钥并保存到 `data/api_key`。
+If `MUSE2API_API_KEY` is not set, a key is generated on first start and saved to `data/api_key`.
 
 ### Docker
 
@@ -138,22 +142,22 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-### 接入真实账号（browser 驱动）
+### Use a real account (browser driver)
 
-1. 安装 Chromium 或 Chrome，并在 `.env` 中设置 `MUSE2API_DRIVER=browser`。
-2. 在已登录 muse.ai 的浏览器里导出 cookie，至少需要 `hatch_sess`、`hatch_gw`、`hatch_vml`、`hatch_native_auth_device` 这四个。
-3. 调用 Admin API 导入账号（见下文示例）。
+1. Install Chromium or Chrome and set `MUSE2API_DRIVER=browser` in `.env`.
+2. Export the cookies from a browser that is logged in to muse.ai. At least `hatch_sess`, `hatch_gw`, `hatch_vml` and `hatch_native_auth_device` are required.
+3. Import the account through the Admin API (see the example below).
 
-## API 使用示例
+## API examples
 
-所有 `/v1/*` 接口都需要在请求头中携带 `Authorization: Bearer <API_KEY>`；`/admin/*` 接口使用 `MUSE2API_ADMIN_KEY`，未设置时与 API Key 相同。
+Every `/v1/*` endpoint requires the header `Authorization: Bearer <API_KEY>`. The `/admin/*` endpoints use `MUSE2API_ADMIN_KEY`, which defaults to the API key when unset.
 
-**对话（流式）**
+**Chat (streaming)**
 
 ```bash
 curl http://localhost:18610/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"你好"}],"stream":true}'
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
 
 **OpenAI Python SDK**
@@ -164,32 +168,32 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:18610/v1", api_key="<API_KEY>")
 resp = client.chat.completions.create(
     model="muse-chat",
-    messages=[{"role": "user", "content": "写一首关于秋天的短诗"}],
+    messages=[{"role": "user", "content": "Write a short poem about autumn"}],
 )
 print(resp.choices[0].message.content)
 ```
 
-**文生图**
+**Text to image**
 
 ```bash
 curl http://localhost:18610/v1/images/generations \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"prompt":"赛博朋克风格的雨夜街道","size":"16:9","response_format":"url"}'
+  -d '{"prompt":"A cyberpunk street on a rainy night","size":"16:9","response_format":"url"}'
 ```
 
-**文生视频（异步任务）**
+**Text to video (async task)**
 
 ```bash
-# 创建任务，返回 {"id": "task_xxx", "status": "queued", ...}
+# Create a task; returns {"id": "task_xxx", "status": "queued", ...}
 curl http://localhost:18610/v1/videos \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"prompt":"枫叶在微风中飘落","duration":5,"size":"16:9"}'
+  -d '{"prompt":"Maple leaves falling in a light breeze","duration":5,"size":"16:9"}'
 
-# 轮询任务状态，成功后 result.url 为视频地址
+# Poll the task; on success, result.url points to the video
 curl http://localhost:18610/v1/videos/task_xxx -H "Authorization: Bearer $KEY"
 ```
 
-**导入账号**
+**Import an account**
 
 ```bash
 curl http://localhost:18610/admin/accounts \
@@ -197,60 +201,60 @@ curl http://localhost:18610/admin/accounts \
   -d '{"label":"acc1","cookies":{"hatch_sess":"...","hatch_gw":"...","hatch_vml":"...","hatch_native_auth_device":"..."}}'
 ```
 
-### 接口一览
+### Endpoints
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |---|---|---|
-| GET | `/healthz` · `/readyz` | 存活检查 · 就绪检查（驱动状态和可用账号数） |
-| GET | `/v1/models` | 模型列表，包含 `gpt-4o`、`dall-e-3` 等别名 |
-| POST | `/v1/chat/completions` | 对话，支持流式和非流式 |
-| POST | `/v1/images/generations` | 文生图，返回 `url` 或 `b64_json` |
-| POST | `/v1/videos` · GET `/v1/videos/{id}` | 创建视频任务 · 查询任务 |
-| GET | `/v1/media/{name}` | 获取生成的媒体文件 |
-| GET/POST/PATCH/DELETE | `/admin/accounts[/{id}]` | 账号增删改查 |
-| POST | `/admin/accounts/{id}/renew` · `/reset` | 续期会话 · 重置账号状态 |
-| GET | `/admin/status` · `/admin/tasks` | 服务状态 · 任务列表 |
-| POST | `/v1/responses` · `/v1/images/edits` | 预留，当前返回 501 |
+| GET | `/healthz` · `/readyz` | Liveness · readiness (driver state and available accounts) |
+| GET | `/v1/models` | Model list, including aliases such as `gpt-4o` and `dall-e-3` |
+| POST | `/v1/chat/completions` | Chat, streaming and non-streaming |
+| POST | `/v1/images/generations` | Text to image, returns `url` or `b64_json` |
+| POST | `/v1/videos` · GET `/v1/videos/{id}` | Create a video task · query a task |
+| GET | `/v1/media/{name}` | Download generated media |
+| GET/POST/PATCH/DELETE | `/admin/accounts[/{id}]` | Account CRUD |
+| POST | `/admin/accounts/{id}/renew` · `/reset` | Renew session · reset account state |
+| GET | `/admin/status` · `/admin/tasks` | Service status · task list |
+| POST | `/v1/responses` · `/v1/images/edits` | Reserved, currently return 501 |
 
-## 配置项
+## Configuration
 
-所有配置都通过环境变量（前缀 `MUSE2API_`）或 `.env` 文件设置，完整列表见 [.env.example](.env.example)。常用配置如下：
+All settings come from environment variables (prefix `MUSE2API_`) or a `.env` file. See [.env.example](.env.example) for the full list. The most common ones:
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 |---|---|---|
-| `MUSE2API_DRIVER` | `mock` | 驱动类型：`mock` / `browser` / `http` |
-| `MUSE2API_HOST` · `MUSE2API_PORT` | `127.0.0.1` · `18610` | 监听地址与端口 |
-| `MUSE2API_API_KEY` | 自动生成 | `/v1/*` 接口的鉴权密钥 |
-| `MUSE2API_ADMIN_KEY` | 同 API Key | `/admin/*` 接口的鉴权密钥 |
-| `MUSE2API_PUBLIC_BASE` | 空 | 对外访问地址，用于拼接媒体链接；留空时根据请求自动推断 |
-| `MUSE2API_POOL_STRATEGY` | `lru` | 账号调度策略：`lru` / `round_robin` / `affinity` |
-| `MUSE2API_MAX_FAILOVER` | `2` | 失败后最多换号重试的次数 |
-| `MUSE2API_CHROMIUM_PATH` | 自动探测 | 浏览器可执行文件路径 |
-| `MUSE2API_KEEPALIVE_ENABLED` | `false` | 是否在后台定期续期会话 |
+| `MUSE2API_DRIVER` | `mock` | Driver: `mock` / `browser` / `http` |
+| `MUSE2API_HOST` · `MUSE2API_PORT` | `127.0.0.1` · `18610` | Listen address and port |
+| `MUSE2API_API_KEY` | auto-generated | Key for `/v1/*` endpoints |
+| `MUSE2API_ADMIN_KEY` | same as API key | Key for `/admin/*` endpoints |
+| `MUSE2API_PUBLIC_BASE` | empty | Public base URL used in media links; derived from the request when empty |
+| `MUSE2API_POOL_STRATEGY` | `lru` | Account scheduling: `lru` / `round_robin` / `affinity` |
+| `MUSE2API_MAX_FAILOVER` | `2` | Maximum number of retries on another account |
+| `MUSE2API_CHROMIUM_PATH` | auto-detected | Path to the browser executable |
+| `MUSE2API_KEEPALIVE_ENABLED` | `false` | Periodically renew sessions in the background |
 
-## 路线图与可认领模块
+## Roadmap
 
-所有预留模块和待完成的工作都记录在 **[TODO.md](TODO.md)**，按优先级分为四组：
+All reserved modules and outstanding work are tracked in **[TODO.md](TODO.md)**, in four groups:
 
-- **验证与联调（最先做）**：跑通测试、用真实账号联调 browser 驱动、验证生图生视频和会话续期；
-- **驱动层**：HTTP 协议直连驱动、复用会话线程、额度查询；
-- **协议层**：`/v1/responses`、`/v1/images/edits`、模拟 Tool calling、流式心跳；
-- **账号、管理与运维**：多种 cookie 导入格式、浏览器扩展、Web 管理面板、存储后端、媒体清理、多 Key 限流、监控指标。
+- **Verification and live testing (do first)**: get the tests passing, test the browser driver against real accounts, and verify image/video generation and session renewal.
+- **Drivers**: direct HTTP protocol driver, conversation thread reuse, quota lookup.
+- **Protocol**: `/v1/responses`, `/v1/images/edits`, emulated tool calling, streaming heartbeats.
+- **Accounts, admin and operations**: more cookie import formats, browser extension, web console, storage backends, media cleanup, multiple keys with rate limits, metrics.
 
-每项任务都写明了位置、做法和完成标准。代码中标记为 `TODO(contributors)` 的地方就是预留的扩展点。
+Each task lists its location, approach and definition of done. Places marked `TODO(contributors)` in the code are the reserved extension points.
 
-## 参与开发
+## Contributing
 
-欢迎认领 [TODO.md](TODO.md) 中的任务。开始之前请先开一个 issue 说明要做的内容，开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+You are welcome to pick up any task in [TODO.md](TODO.md). Please open an issue describing what you plan to do before you start; see [CONTRIBUTING.md](CONTRIBUTING.md) for conventions.
 
 ```bash
-pytest           # 测试全部基于 Mock 驱动
-ruff check .     # 代码风格检查
+pytest           # all tests use the mock driver
+ruff check .     # lint
 ```
 
-## 声明
+## Disclaimer
 
-本项目仅供学习与技术研究使用，请遵守 muse.ai 的服务条款及当地法律法规。请勿提交或公开任何账号 cookie。
+This project is for learning and technical research only. Please comply with muse.ai's terms of service and local laws. Never commit or publish account cookies.
 
 ## License
 

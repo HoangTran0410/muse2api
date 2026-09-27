@@ -1,47 +1,49 @@
-# 架构设计
+# Architecture
 
-## 分层
+## Layers
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ api/            OpenAI 协议层（FastAPI 路由、schema、鉴权）   │
+│ api/            OpenAI protocol layer (routes, schemas, auth)│
 │   routes/chat.py  images.py  videos.py  media.py  admin.py   │
 ├─────────────────────────────────────────────────────────────┤
-│ services/       服务层                                        │
-│   gateway.py    在账号池上执行 driver 调用 + 故障转移          │
-│   tasks.py      后台长任务（视频等）                           │
-│   container.py  依赖装配（app.state.services）                 │
+│ services/       Service layer                                │
+│   gateway.py    Runs driver calls on pooled accounts,        │
+│                 with failover                                │
+│   tasks.py      Background long-running tasks (video, ...)   │
+│   container.py  Dependency wiring (app.state.services)       │
 ├──────────────────────────────┬──────────────────────────────┤
-│ accounts/  账号池             │ core/  与上游无关的纯逻辑      │
-│   model / store / pool        │   models   模型注册与别名      │
-│   keepalive  会话续期          │   prompt   messages→单条 prompt│
-│                               │   media    媒体落盘/图片输入    │
+│ accounts/  Account pool       │ core/  Upstream-agnostic     │
+│   model / store / pool        │   models   registry, aliases │
+│   keepalive  session renewal  │   prompt   messages → prompt │
+│                               │   media    storage, inputs   │
 ├──────────────────────────────┴──────────────────────────────┤
-│ drivers/        唯一与 muse.ai 交互的层                        │
-│   base.py   MuseDriver 抽象 + 请求/结果数据结构                │
-│   mock.py   离线驱动                                          │
-│   browser/  Chromium + CDP（cdp.py / chromium.py / dom.py）    │
-│   http/     协议直连（预留）                                   │
+│ drivers/        The only layer that talks to muse.ai         │
+│   base.py   MuseDriver interface + request/result types      │
+│   mock.py   Offline driver                                   │
+│   browser/  Chromium + CDP (cdp.py / chromium.py / dom.py)   │
+│   http/     Direct protocol (reserved)                       │
 ├─────────────────────────────────────────────────────────────┤
-│ upstream/muse.py  上游常量（URL、cookie 名）与 HTTP 会话续期    │
+│ upstream/muse.py  Upstream constants (URLs, cookie names)    │
+│                   and HTTP session renewal                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-依赖方向严格自上而下：`api → services → accounts/core → drivers → upstream`。路由不直接调用 driver，driver 不感知 HTTP 协议格式。
+Dependencies flow strictly downward: `api → services → accounts/core → drivers → upstream`. Routes never call a driver directly, and drivers know nothing about the HTTP wire format.
 
-## 一次请求的生命周期（chat）
+## Lifecycle of a chat request
 
-1. `routes/chat.py` 校验请求 → `resolve_model` 解析别名 → `flatten_messages` 把多轮消息压成一条 prompt 并提取图片。
-2. `Gateway.chat_stream` 通过 `AccountPool.lease()` 借出一个账号（按策略挑选、受单账号并发上限约束）。
-3. 调用 `driver.chat_stream(account, ChatRequest)`，得到文本增量。
-4. 失败时：
-   - `UpstreamAuthError` → 账号标记 `invalid`；
-   - `UpstreamQuotaError` → 冷却 ≥1 小时；
-   - 其他可重试错误 → 冷却 `account_cooldown` 秒；
-   - 若还没有向客户端输出任何内容，自动换号重试（最多 `max_failover` 次）。
-5. 流式场景下，路由先拉取第一个增量再返回 200，保证"无可用账号 / 上游鉴权失败"等错误以正确的 HTTP 状态码返回。
+1. `routes/chat.py` validates the request, `resolve_model` resolves aliases, and `flatten_messages` merges the conversation into a single prompt and extracts images.
+2. `Gateway.chat_stream` leases an account through `AccountPool.lease()` (chosen by the configured strategy and subject to the per-account concurrency limit).
+3. It calls `driver.chat_stream(account, ChatRequest)` and receives text deltas.
+4. On failure:
+   - `UpstreamAuthError`: the account is marked `invalid`;
+   - `UpstreamQuotaError`: the account cools down for at least one hour;
+   - any other retryable error: the account cools down for `account_cooldown` seconds;
+   - if nothing has been sent to the client yet, the request is retried on another account (up to `max_failover` times).
+5. For streaming, the route pulls the first delta before returning 200, so errors such as "no account available" or "upstream authentication failed" come back with the right HTTP status code.
 
-## Driver 契约
+## Driver contract
 
 ```python
 class MuseDriver(ABC):
@@ -51,25 +53,25 @@ class MuseDriver(ABC):
 
     async def startup(self) / shutdown(self)
     async def health(self) -> dict
-    def chat_stream(self, account, ChatRequest) -> AsyncIterator[str]   # 必须实现
+    def chat_stream(self, account, ChatRequest) -> AsyncIterator[str]   # required
     async def generate_image(self, account, ImageRequest) -> list[MediaResult]
     async def generate_video(self, account, VideoRequest) -> MediaResult
     async def renew_session(self, account) -> SessionInfo
     async def quota(self, account) -> dict
 ```
 
-- 未实现的能力抛 `FeatureNotImplemented`（HTTP 501），上层据此降级。
-- 错误必须映射到 `errors.py` 中的 `Upstream*` 类型，账号池依赖它们判断账号状态。
-- driver 不负责重试、落盘、URL 拼装。
+- Unimplemented capabilities raise `FeatureNotImplemented` (HTTP 501) so the upper layers can degrade gracefully.
+- Errors must be mapped to the `Upstream*` types in `errors.py`; the account pool relies on them to decide an account's state.
+- Drivers are not responsible for retries, persistence or building URLs.
 
-## Browser 驱动要点
+## Browser driver notes
 
-- 一个 Chromium 进程；每个账号一个 `Target.createBrowserContext` 隔离上下文 + 一个复用的 tab，切号无需清 cookie。
-- 所有 DOM 选择器与页面脚本集中在 `drivers/browser/dom.py`，muse.ai 改版时通常只需改这一个文件。
-- 输入通过原生 setter + `input` 事件写入 textarea（React 可感知，长文本也快），失败时回退 Enter 键。
-- 输出检测：轮询最后一个助手气泡文本做增量；Stop 按钮消失且文本稳定即结束。
-- 媒体：等待新出现的附件节点，在页面上下文内 `fetch(blob:)` 转 base64 取回字节。
+- One Chromium process. Each account gets its own isolated context via `Target.createBrowserContext` plus one reused tab, so switching accounts never requires clearing cookies.
+- All DOM selectors and in-page scripts live in `drivers/browser/dom.py`. When muse.ai changes its UI, this is usually the only file that needs updating.
+- Text is written into the textarea through the native value setter plus an `input` event, so React picks it up and long prompts stay fast. If the send button cannot be found, it falls back to pressing Enter.
+- Output detection polls the text of the last assistant bubble and emits the new part. The reply is considered finished once the Stop button is gone and the text has stopped changing.
+- Media: wait for a new attachment node, then `fetch()` its `blob:` URL inside the page and return the bytes as base64.
 
-## 路线图 / 可认领模块
+## Roadmap
 
-预留模块和待完成的工作统一记录在根目录的 [TODO.md](../TODO.md)。
+Reserved modules and outstanding work are tracked in [TODO.md](../TODO.md) at the repository root.

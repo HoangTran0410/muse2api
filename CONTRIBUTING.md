@@ -1,6 +1,6 @@
-# 参与开发
+# Contributing
 
-## 环境
+## Setup
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -8,29 +8,29 @@ pip install -e '.[dev]'
 pytest && ruff check .
 ```
 
-默认 `MUSE2API_DRIVER=mock`，不需要账号即可开发 API 层与前端。
+The default is `MUSE2API_DRIVER=mock`, so you can work on the API layer and front end without any account.
 
-## 认领模块
+## Picking up a task
 
-可认领的任务列表见 [TODO.md](TODO.md)。开始前请先开一个 issue（标题格式 `[认领] 编号 任务名`），并在 TODO.md 的"负责人"一栏填上你的 GitHub ID，避免重复劳动。代码中标记为 `TODO(contributors)` 的位置是预留的扩展点。
+Available tasks are listed in [TODO.md](TODO.md). Before starting, open an issue titled `[Claim] <ID> <task name>` and put your GitHub ID in the "Owner" column of TODO.md, so that nobody duplicates the work. Places marked `TODO(contributors)` in the code are the reserved extension points.
 
-## 约定
+## Conventions
 
-- 依赖方向：`api → services → accounts/core → drivers → upstream`，不要反向引用。
-- 与 muse.ai 页面结构相关的内容只放在 `drivers/browser/dom.py`，上游 URL/cookie 名只放在 `upstream/muse.py`。
-- 新增 driver 能力时同步更新 `DriverCapabilities`，并在 `MockDriver` 中提供假实现，保证测试不依赖外网。
-- 上游错误必须映射到 `errors.py` 中的类型；不要在 driver 里吞掉异常。
-- CI 中不允许访问真实 muse.ai；需要上游数据的测试请使用录制的 fixture。
-- 不要提交 cookie、`data/` 目录或 `.env`。
+- Dependency direction: `api → services → accounts/core → drivers → upstream`. Never import upward.
+- Anything that depends on muse.ai's page structure belongs only in `drivers/browser/dom.py`; upstream URLs and cookie names belong only in `upstream/muse.py`.
+- When adding a driver capability, update `DriverCapabilities` and add a fake implementation to `MockDriver` so that tests never need network access.
+- Upstream errors must be mapped to the types in `errors.py`; never swallow exceptions inside a driver.
+- CI must never contact the real muse.ai; tests that need upstream data should use recorded fixtures.
+- Never commit cookies, the `data/` directory or `.env`.
 
-## 新增一个 Driver
+## Adding a driver
 
-1. 在 `src/muse2api/drivers/<name>/` 下实现 `MuseDriver` 子类。
-2. 在 `drivers/registry.py` 注册，并把名字加到 `config.DriverName`。
-3. 至少实现 `chat_stream`，其余能力未实现时保持抛出 `FeatureNotImplemented`。
-4. 补充测试与文档。
+1. Implement a `MuseDriver` subclass under `src/muse2api/drivers/<name>/`.
+2. Register it in `drivers/registry.py` and add its name to `config.DriverName`.
+3. Implement at least `chat_stream`; leave other capabilities raising `FeatureNotImplemented` until they are done.
+4. Add tests and documentation.
 
-## 提交
+## Submitting changes
 
-- 分支：`feat/<模块>`、`fix/<问题>`。
-- 提交前确保 `pytest` 与 `ruff check .` 通过。
+- Branch names: `feat/<module>`, `fix/<issue>`.
+- Make sure `pytest` and `ruff check .` pass before opening a PR.
