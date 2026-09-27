@@ -25,7 +25,7 @@
 - [配置项](#配置项)
 - [路线图与可认领模块](#路线图与可认领模块)
 - [参与开发](#参与开发)
-- [致谢与声明](#致谢与声明)
+- [声明](#声明)
 
 ## 项目简介
 
@@ -230,34 +230,27 @@ curl http://localhost:18610/admin/accounts \
 
 ## 路线图与可认领模块
 
-| 模块 | 位置 | 说明 |
-|---|---|---|
-| HTTP 协议直连驱动 | `drivers/http/` | 抓包整理协议文档，实现不依赖浏览器的对话和生成 |
-| 复用会话线程 | `drivers/browser/` + `AffinityStrategy` | 同一会话复用线程，降低首字延迟 |
-| `/v1/responses` | `api/routes/responses.py` | 适配 Responses API（Codex 等客户端使用） |
-| `/v1/images/edits` | `api/routes/images.py` | 支持 multipart 上传参考图 |
-| 额度查询 | `MuseDriver.quota` | 读取账号用量，作为调度依据 |
-| Web 管理面板 | `web/`（新建） | 基于 `/admin/*` API 开发 |
-| Cookie 导入扩展 | `extension/`（新建） | 一键把浏览器登录态推送到账号池 |
-| 存储后端 | `accounts/store.py` | 用 SQLite 或 Redis 实现 `AccountStore` |
-| Tool calling | `core/prompt.py` | 通过提示词模拟 function calling |
-| 可观测性 | `observability/`（新建） | Prometheus 指标、请求日志 |
+所有预留模块和待完成的工作都记录在 **[TODO.md](TODO.md)**，按优先级分为四组：
 
-代码中标记为 `TODO(contributors)` 的地方就是预留的扩展点。
+- **验证与联调（最先做）**：跑通测试、用真实账号联调 browser 驱动、验证生图生视频和会话续期；
+- **驱动层**：HTTP 协议直连驱动、复用会话线程、额度查询；
+- **协议层**：`/v1/responses`、`/v1/images/edits`、模拟 Tool calling、流式心跳；
+- **账号、管理与运维**：多种 cookie 导入格式、浏览器扩展、Web 管理面板、存储后端、媒体清理、多 Key 限流、监控指标。
+
+每项任务都写明了位置、做法和完成标准。代码中标记为 `TODO(contributors)` 的地方就是预留的扩展点。
 
 ## 参与开发
 
-欢迎认领上表中的模块。开始之前请先开一个 issue 说明要做的内容，开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+欢迎认领 [TODO.md](TODO.md) 中的任务。开始之前请先开一个 issue 说明要做的内容，开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```bash
 pytest           # 测试全部基于 Mock 驱动
 ruff check .     # 代码风格检查
 ```
 
-## 致谢与声明
+## 声明
 
-- 设计上参考了 [czg86389-hub/muse2api](https://github.com/czg86389-hub/muse2api)（用 CDP 驱动网页的思路），以及 gemini2api / gemini-webapi 一类项目（协议直连、cookie 续期）。本项目的代码是独立实现的。
-- 本项目仅供学习与技术研究使用，请遵守 muse.ai 的服务条款及当地法律法规。请勿提交或公开任何账号 cookie。
+本项目仅供学习与技术研究使用，请遵守 muse.ai 的服务条款及当地法律法规。请勿提交或公开任何账号 cookie。
 
 ## License
 

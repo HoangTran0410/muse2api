@@ -12,7 +12,7 @@ pytest && ruff check .
 
 ## 认领模块
 
-可认领模块列表见 [docs/ARCHITECTURE.md#路线图--可认领模块](docs/ARCHITECTURE.md)。开始前请先开一个 issue 说明要做的模块，避免重复劳动。代码中标记为 `TODO(contributors)` 的位置是预留的扩展点。
+可认领的任务列表见 [TODO.md](TODO.md)。开始前请先开一个 issue（标题格式 `[认领] 编号 任务名`），并在 TODO.md 的"负责人"一栏填上你的 GitHub ID，避免重复劳动。代码中标记为 `TODO(contributors)` 的位置是预留的扩展点。
 
 ## 约定
 

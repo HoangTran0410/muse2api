@@ -1,8 +1,7 @@
 """HTTP/WebSocket protocol driver (reserved).
 
-Goal: talk to muse.ai's backend directly, without a browser, the way projects
-such as gemini-webapi do for Gemini. This removes the Chromium dependency and
-cuts latency and memory by an order of magnitude.
+Goal: talk to muse.ai's backend directly, without a browser. This removes the
+Chromium dependency and cuts latency and memory by an order of magnitude.
 
 Work breakdown (open for contributors, see CONTRIBUTING.md):
 

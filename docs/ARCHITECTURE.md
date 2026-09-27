@@ -72,15 +72,4 @@ class MuseDriver(ABC):
 
 ## 路线图 / 可认领模块
 
-| 模块 | 位置 | 说明 |
-|---|---|---|
-| HTTP 协议直连驱动 | `drivers/http/` | 抓包记录协议到 `docs/protocol.md`，实现无浏览器对话/生成 |
-| 热线程复用 | `drivers/browser/driver.py` + `AffinityStrategy` | 同一会话复用线程，降低首字延迟 |
-| `/v1/responses` | `api/routes/responses.py` | Responses API 适配（Codex 等客户端） |
-| `/v1/images/edits` | `api/routes/images.py` | multipart 上传参考图 |
-| 额度查询 | `MuseDriver.quota` | 读取账号用量，调度时参考 |
-| Web 管理面板 | `web/`（新建）| 基于 `/admin/*` API |
-| Cookie 导入扩展 | `extension/`（新建）| 一键把登录态推送到 `/admin/accounts` |
-| 存储后端 | `accounts/store.py` | SQLite / Redis 实现 `AccountStore` 协议 |
-| Tool calling | `core/prompt.py` | 用提示词协议模拟 function calling |
-| 指标 | 新建 `observability/` | Prometheus 指标、请求日志 |
+预留模块和待完成的工作统一记录在根目录的 [TODO.md](../TODO.md)。
