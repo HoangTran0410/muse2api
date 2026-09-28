@@ -6,9 +6,9 @@ Design notes
   cookie jar), so switching accounts never requires clearing cookies.
 * One tab per account, reused across requests. Per-account serialisation is
   guaranteed by the account pool (``MUSE2API_ACCOUNT_MAX_CONCURRENCY=1``).
-* Every request starts from a fresh thread, which keeps OpenAI's stateless
-  semantics. Reusing a warm thread for lower latency is a TODO (see
-  ``AffinityStrategy`` and docs/ARCHITECTURE.md).
+* A follow-up from the same user stays on that tab when the new ``messages``
+  continue the conversation already on the page. Anything else opens a fresh
+  thread, so two users never share a page.
 """
 
 from __future__ import annotations
@@ -19,11 +19,13 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from ...accounts.model import Account
 from ...config import Settings
+from ...core.prompt import followup_text
 from ...errors import (
     UpstreamAuthError,
     UpstreamError,
@@ -51,6 +53,14 @@ log = logging.getLogger(__name__)
 POLL_INTERVAL = 0.15
 STABLE_POLLS_DONE = 4
 STABLE_POLLS_FORCE = 12
+# Past this many assistant bubbles the page gets slow and a new thread is cheaper.
+HOT_BUBBLE_LIMIT = 16
+
+
+def is_thread_url(url: str) -> bool:
+    """A real muse conversation, not the empty "new thread" page."""
+    path = urlsplit(url).path.rstrip("/")
+    return path.startswith("/thread/") and path != "/thread/new"
 
 
 @dataclass
@@ -59,6 +69,10 @@ class _Tab:
     context_id: str
     target_id: str
     session: CDPSession
+    hint: str | None = None
+    turns: list[tuple[str, str]] = field(default_factory=list)
+    image_count: int = 0
+    thread_url: str = ""
 
 
 class BrowserDriver(MuseDriver):
@@ -78,7 +92,8 @@ class BrowserDriver(MuseDriver):
     async def startup(self) -> None:
         exe = find_chromium(self.settings.chromium_path)
         self._chromium = ChromiumProcess(
-            exe, self.settings.cdp_port, self.settings.profile_dir, self.settings.headless
+            exe, self.settings.cdp_port, self.settings.profile_dir, self.settings.headless,
+            proxy=self.settings.browser_proxy,
         )
         ws_url = await self._chromium.start()
         self._browser = await CDPSession.connect(ws_url)
@@ -155,7 +170,75 @@ class BrowserDriver(MuseDriver):
             }
             await session.send("Network.setCookie", params)
 
+    @staticmethod
+    def _forget(tab: _Tab) -> None:
+        tab.hint = None
+        tab.turns = []
+        tab.image_count = 0
+        tab.thread_url = ""
+
+    def _load_hot(self, tab: _Tab, account: Account) -> None:
+        """Restore the last conversation after a restart or a new browser tab."""
+        if tab.turns or tab.thread_url:
+            return
+        hot = account.meta.get("hot_page")
+        if not isinstance(hot, dict):
+            return
+        turns = []
+        for item in hot.get("turns") or []:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                turns.append((str(item[0]), str(item[1])))
+        tab.turns = turns
+        tab.hint = hot.get("hint") or None
+        tab.thread_url = str(hot.get("url") or "")
+        try:
+            tab.image_count = int(hot.get("image_count") or 0)
+        except (TypeError, ValueError):
+            tab.image_count = 0
+
+    def _save_hot(self, tab: _Tab, account: Account, req: ChatRequest, url: str) -> None:
+        if url:
+            tab.thread_url = url
+        tab.hint = req.conversation_hint
+        tab.turns = list(req.turns)
+        tab.image_count = len(req.images)
+        account.meta["hot_page"] = {
+            "hint": req.conversation_hint or "",
+            "turns": [list(turn) for turn in req.turns],
+            "url": tab.thread_url,
+            "image_count": tab.image_count,
+        }
+
+    async def _href(self, tab: _Tab) -> str:
+        try:
+            return (await tab.session.evaluate("location.href")) or ""
+        except CDPError:
+            return ""
+
+    async def _on_thread(self, tab: _Tab) -> bool:
+        """The open page is the saved conversation and can take another message."""
+        href = await self._href(tab)
+        if not is_thread_url(href):
+            return False
+        if tab.thread_url and urlsplit(href).path.rstrip("/") != urlsplit(tab.thread_url).path.rstrip("/"):
+            return False
+        try:
+            page = await tab.session.evaluate(dom.PAGE_STATE) or {}
+            if not page.get("hasInput"):
+                return False
+            if "Connecting..." in (page.get("head") or ""):
+                return False
+            state = await self._state(tab)
+        except CDPError:
+            return False
+        if state.get("generating"):
+            return False
+        if any(hint in state.get("tail", "") for hint in dom.STALL_HINTS):
+            return False
+        return (state.get("agentCount") or 0) < HOT_BUBBLE_LIMIT
+
     async def _new_thread(self, tab: _Tab) -> None:
+        self._forget(tab)
         await tab.session.send("Page.navigate", {"url": muse.NEW_THREAD_URL})
         deadline = time.monotonic() + self.settings.page_ready_timeout
         state: dict = {}
@@ -221,11 +304,77 @@ class BrowserDriver(MuseDriver):
         return tab, base
 
     # ------------------------------------------------------------ chat
+    async def _live_continuation(self, tab: _Tab) -> bool:
+        """This tab already shows the stored conversation, even if its URL is still /thread/new."""
+        last_user = next((text for role, text in reversed(tab.turns) if role == "user"), "")
+        if not last_user:
+            return False
+        try:
+            page = await tab.session.evaluate(dom.PAGE_STATE) or {}
+            if not page.get("hasInput"):
+                return False
+            state = await self._state(tab)
+            present = await tab.session.evaluate(
+                f"!!(document.body && document.body.innerText.includes({dom.q(last_user[:80])}))"
+            )
+        except CDPError:
+            return False
+        if state.get("generating"):
+            return False
+        if any(hint in state.get("tail", "") for hint in dom.STALL_HINTS):
+            return False
+        if (state.get("agentCount") or 0) >= HOT_BUBBLE_LIMIT:
+            return False
+        return bool(present)
+
+    async def _open_saved(self, tab: _Tab) -> None:
+        await tab.session.send("Page.navigate", {"url": tab.thread_url})
+        deadline = time.monotonic() + self.settings.page_ready_timeout
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.25)
+            if await self._on_thread(tab):
+                return
+        raise UpstreamTimeout("saved conversation did not become ready")
+
+    async def _begin_chat(self, account: Account, req: ChatRequest):
+        """Send ``req`` on the saved conversation when it continues that page."""
+        tab = await self._tab(account)
+        prompt, images = req.prompt, req.images
+        try:
+            self._load_hot(tab, account)
+            same_owner = (tab.hint or "") == (req.conversation_hint or "")
+            follow = followup_text(tab.turns, req.turns) if tab.turns and same_owner else None
+            if follow and len(req.images) >= tab.image_count and (
+                tab.thread_url or await self._live_continuation(tab)
+            ):
+                if await self._on_thread(tab) or await self._live_continuation(tab):
+                    log.info("reusing hot page %s", tab.thread_url or "open page")
+                elif tab.thread_url:
+                    log.info("reopening %s", tab.thread_url)
+                    await self._open_saved(tab)
+                prompt = follow
+                images = req.images[tab.image_count:]
+            else:
+                log.info("opening a new thread")
+                account.meta.pop("hot_page", None)
+                await self._new_thread(tab)
+            base = await self._state(tab)
+            await self._attach(tab, images)
+            await self._send(tab, prompt)
+            return tab, base
+        except CDPError as exc:
+            await self._close_tab(tab)
+            raise UpstreamError(f"browser error: {exc}") from exc
+        except BaseException:
+            self._forget(tab)
+            raise
+
     async def chat_stream(self, account: Account, req: ChatRequest) -> AsyncIterator[str]:
-        tab, base = await self._prepare(account, req.prompt, req.images)
+        tab, base = await self._begin_chat(account, req)
         base_count, base_text = base.get("agentCount", 0), base.get("lastText", "")
         started = time.monotonic()
         emitted, last, stable, got_first = "", None, 0, False
+        finished = False
         try:
             while True:
                 if req.cancel and req.cancel.is_set():
@@ -253,10 +402,26 @@ class BrowserDriver(MuseDriver):
                 else:
                     stable += 1
                     if (not st.get("generating") and stable >= STABLE_POLLS_DONE) or stable >= STABLE_POLLS_FORCE:
+                        finished = True
                         return
         except CDPError as exc:
             await self._close_tab(tab)
             raise UpstreamError(f"browser error: {exc}") from exc
+        finally:
+            if finished:
+                url = ""
+                for _ in range(10):
+                    url = await self._href(tab)
+                    if is_thread_url(url):
+                        break
+                    await asyncio.sleep(0.2)
+                self._save_hot(tab, account, req, url if is_thread_url(url) else "")
+                if tab.thread_url:
+                    log.info("saved hot page %s", tab.thread_url)
+                else:
+                    log.info("reply finished but the thread url was not ready yet")
+            else:
+                self._forget(tab)
 
     # ------------------------------------------------------------ media
     @staticmethod

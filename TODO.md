@@ -19,7 +19,7 @@ Priorities: **P0** must be done first · **P1** core feature · **P2** better ex
 | A5 | Verify the Docker image builds and runs | P1 | `Dockerfile` | | Not started |
 | A6 | Enable GitHub Actions CI | P1 | `.github/workflows/ci.yml` | | Not started |
 | B1 | Direct HTTP protocol driver | P1 | `drivers/http/` | | Not started |
-| B2 | Reuse conversation threads to cut first-token latency | P2 | `drivers/browser/` | | Not started |
+| B2 | Reuse conversation threads to cut first-token latency | P2 | `drivers/browser/` | | Done |
 | B3 | Quota lookup | P2 | `MuseDriver.quota` | | Not started |
 | C1 | `/v1/responses` endpoint | P1 | `api/routes/responses.py` | | Not started |
 | C2 | `/v1/images/edits` endpoint | P1 | `api/routes/images.py` | | Not started |
@@ -92,10 +92,7 @@ Talk to muse.ai's backend directly, without a browser. This removes Chromium and
 - **Done when**: chat works with `MUSE2API_DRIVER=http` and passes the same API tests as the browser driver.
 
 ### B2 Reuse conversation threads to cut first-token latency · P2
-- The browser driver currently opens a new conversation for every request, and page loading adds a few seconds.
-- Approach: together with the pool's `AffinityStrategy`, consecutive requests from the same client (the `user` field) reuse the same conversation page and only send the new message.
-- To handle: how to tell whether the history sent by the client matches the conversation on the page; when to start over because the conversation is too long; how to recover from a stuck page.
-- **Done when**: first-token latency for follow-up messages drops noticeably, and contexts from different users are never mixed.
+Done. A follow-up whose `messages` continue the conversation already on the page stays on that tab and only the new user text is sent. Pass `user` to keep one person on one account (`affinity`, the default). A different history, a different `user`, a stuck page, or a long thread opens a fresh page.
 
 ### B3 Quota lookup · P2
 - Implement `MuseDriver.quota` to read the account's plan, weekly usage and remaining quota.

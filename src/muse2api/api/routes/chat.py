@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from ...core.media import load_image_ref
 from ...core.models import resolve_model
-from ...core.prompt import flatten_messages
+from ...core.prompt import flatten_messages, message_turns
 from ...drivers.base import ChatRequest, InputImage
 from ...errors import InvalidRequest, Muse2APIError
 from ...services.container import Services
@@ -48,6 +48,7 @@ async def chat_completions(body: ChatCompletionRequest, svc: Services = Depends(
         timeout=svc.settings.chat_timeout,
         first_token_timeout=svc.settings.first_token_timeout,
         conversation_hint=body.user,
+        turns=message_turns([m.model_dump() for m in body.messages]),
         cancel=cancel,
     )
     completion_id = "chatcmpl-" + uuid.uuid4().hex[:24]

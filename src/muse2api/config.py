@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     chromium_path: str = ""
     cdp_port: int = 19210
     headless: bool = True
+    browser_proxy: str = Field(
+        default="",
+        description="Proxy for the browser only, e.g. socks5://127.0.0.1:10808 or http://10.144.1.10:8080. "
+        "Python's own calls (session renewal) follow http_proxy/https_proxy instead.",
+    )
     browser_profile_dir: Path | None = None
     page_ready_timeout: float = 45.0
 
@@ -57,7 +62,7 @@ class Settings(BaseSettings):
     video_timeout: float = 600.0
 
     # --- account pool ---
-    pool_strategy: PoolStrategyName = "lru"
+    pool_strategy: PoolStrategyName = "affinity"
     pool_acquire_timeout: float = 60.0
     account_max_concurrency: int = 1
     account_cooldown: float = 120.0

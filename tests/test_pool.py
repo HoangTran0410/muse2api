@@ -54,7 +54,7 @@ async def test_auth_error_invalidates(tmp_path):
 
 
 async def test_persistence_roundtrip(tmp_path):
-    pool = await _pool(tmp_path, n=2)
+    await _pool(tmp_path, n=2)
     reloaded = AccountPool(JsonAccountStore(tmp_path / "acc.json"))
     await reloaded.load()
     assert {a.id for a in reloaded.all()} == {"a0", "a1"}

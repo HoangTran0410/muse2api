@@ -34,11 +34,13 @@ def find_chromium(configured: str = "") -> str:
 
 
 class ChromiumProcess:
-    def __init__(self, executable: str, port: int, profile_dir: Path, headless: bool = True):
+    def __init__(self, executable: str, port: int, profile_dir: Path, headless: bool = True,
+                 proxy: str = ""):
         self.executable = executable
         self.port = port
         self.profile_dir = profile_dir
         self.headless = headless
+        self.proxy = proxy
         self.proc: asyncio.subprocess.Process | None = None
 
     @property
@@ -47,7 +49,8 @@ class ChromiumProcess:
 
     async def browser_ws_url(self) -> str | None:
         try:
-            async with httpx.AsyncClient(timeout=2) as client:
+            # Local DevTools port must not follow http_proxy/https_proxy.
+            async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
                 r = await client.get(f"{self.http_base}/json/version")
                 return r.json().get("webSocketDebuggerUrl")
         except (httpx.HTTPError, ValueError):
@@ -77,6 +80,8 @@ class ChromiumProcess:
             "--window-size=1440,2200",
             "about:blank",
         ]
+        if self.proxy:
+            args.insert(1, f"--proxy-server={self.proxy}")
         if self.headless:
             args[1:1] = ["--headless=new", "--disable-gpu"]
         if hasattr(os, "geteuid") and os.geteuid() == 0:

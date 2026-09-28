@@ -1,7 +1,7 @@
 import pytest
 
 from muse2api.core.models import resolve_model
-from muse2api.core.prompt import flatten_messages
+from muse2api.core.prompt import flatten_messages, followup_text, message_turns
 from muse2api.errors import InvalidRequest
 
 
@@ -20,6 +20,38 @@ def test_multi_turn_has_roles_and_images():
     assert "[System]\nbe brief" in flat.text
     assert "[User]\nwhat is this" in flat.text
     assert flat.images == ["data:image/png;base64,AAAA"]
+
+
+def test_followup_sends_only_new_user_text():
+    first = message_turns([{"role": "user", "content": "hi"}])
+    second = message_turns([
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "again"},
+    ])
+    assert followup_text(first, second) == "again"
+
+
+def test_followup_rejects_a_different_history():
+    first = message_turns([{"role": "user", "content": "hi"}])
+    other = message_turns([{"role": "user", "content": "a different chat"}])
+    edited = message_turns([
+        {"role": "user", "content": "hi, edited"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "again"},
+    ])
+    assert followup_text(first, other) is None
+    assert followup_text(first, edited) is None
+    assert followup_text(first, first) is None
+
+
+def test_thread_url_ignores_the_new_thread_page():
+    from muse2api.drivers.browser.driver import is_thread_url
+
+    assert is_thread_url("https://muse.ai/thread/abc")
+    assert not is_thread_url("https://muse.ai/thread/new")
+    assert not is_thread_url("https://muse.ai/thread/new/")
+    assert not is_thread_url("https://muse.ai/")
 
 
 def test_resolve_model():

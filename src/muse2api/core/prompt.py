@@ -48,6 +48,39 @@ def _content_to_text(content: Any, images: list[str]) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def message_turns(messages: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Role/text pairs, using the same text extraction as ``flatten_messages``."""
+    turns: list[tuple[str, str]] = []
+    for msg in messages:
+        text = _content_to_text(msg.get("content"), []).strip()
+        if text:
+            turns.append((msg.get("role", "user"), text))
+    return turns
+
+
+def followup_text(previous: list[tuple[str, str]], incoming: list[tuple[str, str]]) -> str | None:
+    """Text to send when ``incoming`` continues a conversation already on the page.
+
+    Returns only the new user text. ``None`` means the histories do not line up, so the
+    caller must open a fresh thread and send the full prompt instead.
+    """
+    if not previous or len(incoming) <= len(previous):
+        return None
+    if incoming[: len(previous)] != list(previous):
+        return None
+    extra = list(incoming[len(previous) :])
+    while extra and extra[0][0] in ("assistant", "tool"):
+        extra = extra[1:]
+    user_text = []
+    for role, text in extra:
+        if role != "user":
+            return None
+        user_text.append(text)
+    if not user_text:
+        return None
+    return "\n\n".join(user_text)
+
+
 def flatten_messages(messages: list[dict[str, Any]]) -> FlatPrompt:
     images: list[str] = []
     turns: list[tuple[str, str]] = []
