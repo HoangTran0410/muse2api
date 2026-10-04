@@ -43,7 +43,8 @@ class MockDriver(MuseDriver):
     name = "mock"
     requires_account = False
     capabilities = DriverCapabilities(
-        chat=True, chat_images=True, image=True, image_edit=True, video=True, renew_session=True
+        chat=True, chat_images=True, image=True, image_edit=True, video=True, renew_session=True,
+        quota=True,
     )
 
     def __init__(self, delay: float = 0.01) -> None:
@@ -88,3 +89,16 @@ class MockDriver(MuseDriver):
 
     async def renew_session(self, account: Account) -> SessionInfo:
         return SessionInfo(ok=True, meta={"driver": "mock"})
+
+    async def quota(self, account: Account) -> dict:
+        """Deterministic fake quota snapshot for plumbing tests and front-end work."""
+        return {
+            "plan": "free",
+            "messages_used": 0,
+            "messages_limit": 100,
+            "messages_remaining": 100,
+            "media_used": 0,
+            "media_limit": 20,
+            "media_remaining": 20,
+            "resets_at": None,
+        }

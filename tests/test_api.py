@@ -85,6 +85,24 @@ def test_reserved_endpoints(client, auth):
     assert client.post("/v1/images/edits", headers=auth).status_code == 501
 
 
+def test_admin_account_quota(client, admin):
+    r = client.post("/admin/accounts", headers=admin,
+                    json={"label": "q1", "cookies": {"hatch_sess": "secretvalue123"}})
+    acc_id = r.json()["account"]["id"]
+
+    q = client.get(f"/admin/accounts/{acc_id}/quota", headers=admin)
+    assert q.status_code == 200
+    body = q.json()
+    assert body["account_id"] == acc_id
+    assert body["quota"]["plan"] == "free"
+    assert body["quota"]["messages_remaining"] == 100
+    assert "checked_at" in body["quota"]
+
+    # The snapshot is persisted in meta and visible in the account list view.
+    listed = client.get("/admin/accounts", headers=admin).json()["data"][0]
+    assert listed["meta"]["quota"]["plan"] == "free"
+
+
 def test_admin_accounts_crud(client, auth, admin):
     assert client.get("/admin/accounts", headers=auth).status_code == 401
 

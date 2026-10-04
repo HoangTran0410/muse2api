@@ -6,6 +6,8 @@ on top of these endpoints; see docs/ARCHITECTURE.md.
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends
 
 from ... import __version__
@@ -91,6 +93,20 @@ async def reset_account(account_id: str, svc: Services = Depends(get_services)) 
 async def renew(account_id: str, svc: Services = Depends(get_services)) -> dict:
     _get(svc, account_id)
     return await renew_account(svc.pool, svc.driver, account_id)
+
+
+@router.get("/accounts/{account_id}/quota")
+async def account_quota(account_id: str, svc: Services = Depends(get_services)) -> dict:
+    """Ask the active driver for the account's quota snapshot and persist it in ``meta``.
+
+    Drivers that do not implement ``MuseDriver.quota`` raise
+    ``FeatureNotImplemented``, which the app renders as HTTP 501.
+    """
+    acc = _get(svc, account_id)
+    snapshot = await svc.driver.quota(acc)
+    acc.meta["quota"] = {"checked_at": time.time(), **snapshot}
+    await svc.pool.upsert(acc)
+    return {"account_id": acc.id, "quota": acc.meta["quota"]}
 
 
 @router.get("/tasks")
