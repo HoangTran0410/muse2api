@@ -514,15 +514,20 @@ class BrowserDriver(MuseDriver):
                     continue
                 got_first = True
                 if text != last:
-                    delta = text[len(emitted):] if text.startswith(emitted) else text
-                    if delta:
-                        emitted = text
+                    # Only append: when the page re-renders text already sent (markdown, code
+                    # block), re-sending it would duplicate it for the caller.
+                    if req.stream and text.startswith(emitted) and text != emitted:
+                        delta, emitted = text[len(emitted):], text
                         yield delta
                     last, stable = text, 0
                 else:
                     stable += 1
                     if (not st.get("generating") and stable >= STABLE_POLLS_DONE) or stable >= STABLE_POLLS_FORCE:
                         finished = True
+                        if not req.stream:
+                            yield last
+                        elif last != emitted:
+                            log.warning("final reply diverged from streamed text; keeping what was sent")
                         return
         except CDPError as exc:
             await self._close_tab(tab)

@@ -56,6 +56,7 @@ async def chat_completions(body: ChatCompletionRequest, request: Request,
         conversation_hint=body.user,
         turns=message_turns([m.model_dump() for m in body.messages]),
         cancel=cancel,
+        stream=body.stream,
     )
     completion_id = "chatcmpl-" + uuid.uuid4().hex[:24]
     created = int(time.time())

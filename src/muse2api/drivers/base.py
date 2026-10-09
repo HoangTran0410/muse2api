@@ -42,6 +42,9 @@ class ChatRequest:
     turns: list[tuple[str, str]] = field(default_factory=list)
     """Role/text pairs of the request, used to continue a hot page instead of resending history."""
     cancel: asyncio.Event | None = None
+    stream: bool = True
+    """False = the caller wants the finished reply only; the driver then yields it once, so a
+    page that re-renders earlier text cannot make the caller join two copies."""
 
 
 @dataclass
