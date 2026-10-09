@@ -60,3 +60,23 @@ def test_resolve_model():
     assert resolve_model(None, "video").id == "muse-video"
     with pytest.raises(InvalidRequest):
         resolve_model("muse-image", "chat")
+
+
+def test_file_video_audio_parts_are_collected_with_names():
+    flat = flatten_messages([{"role": "user", "content": [
+        {"type": "text", "text": "tóm tắt"},
+        {"type": "file", "file": {"file_data": "data:application/pdf;base64,QQ==", "filename": "a.pdf"}},
+        {"type": "input_file", "file_data": "data:text/csv;base64,QQ==", "filename": "b.csv"},
+        {"type": "video_url", "video_url": {"url": "https://x.test/v.mp4"}},
+        {"type": "input_audio", "input_audio": {"data": "QQ==", "format": "wav"}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,QQ=="}},
+    ]}])
+    assert flat.text == "tóm tắt"
+    assert flat.images == [
+        "data:application/pdf;base64,QQ==",
+        "data:text/csv;base64,QQ==",
+        "https://x.test/v.mp4",
+        "data:audio/wav;base64,QQ==",
+        "data:image/png;base64,QQ==",
+    ]
+    assert flat.names == ["a.pdf", "b.csv", "", "", ""]

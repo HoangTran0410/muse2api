@@ -12,6 +12,13 @@ import json
 INPUT = "textarea"
 AGENT_BUBBLE = 'div[class*="hatch-agent-bubble-bg"]'
 ATTACHMENT = '[data-testid^="hatch-chat-attachment-presentation-"]'
+# A file the user attached renders as a card inside a bubble that shares the agent's CSS
+# variable: only a filename (span[title]) and a type label, never reply text.
+IS_FILE_CARD_JS = """(b) => {
+  const t = b.querySelector('span[title]');
+  const lines = (b.innerText || '').trim().split('\\n').filter(Boolean);
+  return !!t && lines.length <= 2 && t.getAttribute('title') === lines[0];
+}"""
 STOP_BUTTON = 'button[aria-label*="Stop" i]'
 # The agent asks before acting on the user's behalf (e.g. uploading the result to
 # muse.ai/files as a public link). Nobody answers it here, so it would block for minutes.
@@ -48,7 +55,8 @@ CHAT_STATE = f"""(() => {{
     return (s.overflowY === 'auto' || s.overflowY === 'scroll') && e.scrollHeight > e.clientHeight + 50;
   }});
   scrollers.forEach(e => {{ e.scrollTop = e.scrollHeight; }});
-  const bubbles = [...document.querySelectorAll({q(AGENT_BUBBLE)})];
+  const isFileCard = {IS_FILE_CARD_JS};
+  const bubbles = [...document.querySelectorAll({q(AGENT_BUBBLE)})].filter(b => !isFileCard(b));
   const last = bubbles.length ? (bubbles[bubbles.length - 1].innerText || '').trim() : '';
   const atts = [...document.querySelectorAll({q(ATTACHMENT)})].map(a => {{
     const v = a.querySelector('video'), i = a.querySelector('img');
@@ -90,7 +98,8 @@ DENY_APPROVALS = f"""(() => {{
 # bubble for every candidate URL (anchor hrefs, media element srcs incl. blob:,
 # and bare URLs in the text) and returns the bubble HTML for diagnostics.
 LAST_BUBBLE_MEDIA = f"""(() => {{
-  const bubbles = [...document.querySelectorAll({q(AGENT_BUBBLE)})];
+  const isFileCard = {IS_FILE_CARD_JS};
+  const bubbles = [...document.querySelectorAll({q(AGENT_BUBBLE)})].filter(b => !isFileCard(b));
   const b = bubbles.length ? bubbles[bubbles.length - 1] : null;
   if (!b) return {{ links: [], html: '' }};
   const urls = [];

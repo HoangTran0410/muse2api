@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from ...core.media import load_image_ref
+from ...core.media import load_input_file
 from ...core.models import resolve_model
 from ...core.prompt import flatten_messages, message_turns
 from ...drivers.base import ChatRequest, InputImage
@@ -40,9 +40,12 @@ async def chat_completions(body: ChatCompletionRequest, request: Request,
     request.state.model = body.model or spec.id
     flat = flatten_messages([m.model_dump() for m in body.messages])
     if not flat.text and not flat.images:
-        raise InvalidRequest("messages contain no text or images")
+        raise InvalidRequest("messages contain no text or files")
 
-    images = [InputImage(*(await load_image_ref(ref))) for ref in flat.images]
+    images = []
+    for ref, name in zip(flat.images, flat.names):
+        data, mime = await load_input_file(ref, name)
+        images.append(InputImage(data, mime, name))
     cancel = asyncio.Event()
     req = ChatRequest(
         prompt=flat.text,

@@ -48,6 +48,16 @@ class MediaStore:
         return mimetypes.guess_type(name)[0] or "application/octet-stream"
 
 
+async def load_input_file(ref: str, name: str = "", *, timeout: float = 60.0) -> tuple[bytes, str]:
+    """Like ``load_image_ref`` for arbitrary attachments: when the reference carries no usable
+    mime (bare base64, or a server answering octet-stream) it is guessed from ``name``."""
+    data, mime = await load_image_ref(ref, timeout=timeout)
+    guessed = mimetypes.guess_type(name)[0] if name else None
+    if guessed and (not ref.strip().startswith(("data:", "http")) or mime in ("application/octet-stream", "")):
+        mime = guessed
+    return data, mime
+
+
 async def load_image_ref(ref: str, *, timeout: float = 20.0) -> tuple[bytes, str]:
     """Decode a data URL or download an http(s) URL. Returns ``(bytes, mime)``."""
     ref = ref.strip()

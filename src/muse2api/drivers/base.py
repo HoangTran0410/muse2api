@@ -23,8 +23,12 @@ ProgressCallback = Callable[[int], None]
 
 @dataclass
 class InputImage:
+    """An attachment sent with the prompt. Despite the name it can be any file muse.ai
+    accepts (image, video, audio, PDF, spreadsheet, ...)."""
+
     data: bytes
     mime: str = "image/png"
+    name: str = ""
 
 
 @dataclass

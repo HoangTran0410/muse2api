@@ -17,6 +17,7 @@ import asyncio
 import base64
 import contextlib
 import logging
+import mimetypes
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -349,12 +350,13 @@ class BrowserDriver(MuseDriver):
     # ------------------------------------------------------------ input
     async def _attach(self, tab: _Tab, images: list[InputImage]) -> None:
         for idx, img in enumerate(images):
-            ext = img.mime.split("/")[-1].replace("jpeg", "jpg")
+            ext = (mimetypes.guess_extension(img.mime) or ".bin").lstrip(".").replace("jpe", "jpg")
             res = await tab.session.evaluate(
-                dom.attach_file(base64.b64encode(img.data).decode(), img.mime, f"input_{idx}.{ext}")
+                dom.attach_file(base64.b64encode(img.data).decode(), img.mime,
+                                img.name or f"input_{idx}.{ext}")
             )
             if not (res or {}).get("ok"):
-                raise UpstreamError(f"failed to attach image: {(res or {}).get('err')}")
+                raise UpstreamError(f"failed to attach file: {(res or {}).get('err')}")
         if images:
             await asyncio.sleep(1.0)
 
