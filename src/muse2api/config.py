@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # --- timeouts (seconds) ---
     chat_timeout: float = 300.0
     first_token_timeout: float = 45.0
+    chat_preamble: str = Field(
+        default="",
+        description="Text put in front of the first message of every new chat thread, e.g. an "
+        "instruction to answer directly without browsing or running tools (muse.ai is an agent).",
+    )
     image_timeout: float = 240.0
     video_timeout: float = 600.0
 

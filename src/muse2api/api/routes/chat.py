@@ -48,7 +48,7 @@ async def chat_completions(body: ChatCompletionRequest, request: Request,
         images.append(InputImage(data, mime, name))
     cancel = asyncio.Event()
     req = ChatRequest(
-        prompt=flat.text,
+        prompt=f"{svc.settings.chat_preamble}\n\n{flat.text}" if svc.settings.chat_preamble else flat.text,
         model=spec.id,
         images=images,
         timeout=svc.settings.chat_timeout,
